@@ -329,3 +329,21 @@ input:disabled, textarea:disabled, select:disabled { cursor: default; color: inh
 .week-type { font-style: normal; font-size: .58em; font-weight: 750; vertical-align: middle; }
 .week-type.small { color: #1b74a0; }
 .week-type.large { color: var(--accent); }
+
+/* Weekly content direction panel */
+.delivery-tools { display: flex; align-items: flex-end; gap: 14px; min-width: min(100%, 680px); }
+.weekly-direction { display: grid; flex: 1; min-width: 310px; gap: 7px; padding: 12px 14px; border: 1px solid rgba(241,83,45,.22); border-radius: 13px; background: linear-gradient(135deg, rgba(255,250,246,.9), rgba(255,255,255,.75)); box-shadow: 0 8px 24px rgba(92,58,35,.04); }
+.weekly-direction span { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.weekly-direction textarea { width: 100%; min-height: 58px; max-height: 112px; padding: 0; border: 0; outline: 0; resize: vertical; background: transparent; color: var(--ink); font: 500 13px/1.72 system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+.weekly-direction textarea::placeholder { color: #aaa69e; }
+.weekly-direction textarea:focus { box-shadow: none; }
+@media (max-width: 1060px) { .section-heading { align-items: flex-start; flex-direction: column; } .delivery-tools { width: 100%; } }
+@media (max-width: 580px) { .delivery-tools { align-items: stretch; flex-direction: column; } .weekly-direction { min-width: 0; } .delivery-tools .primary-button { width: 100%; } }
+
+.image-upload { display: grid; gap: 9px; }
+.image-upload input[type="file"] { padding: 10px; border: 1px dashed var(--line); background: #fffdf8; border-radius: 12px; font-size: 13px; }
+.image-upload small { color: var(--muted); font-size: 12px; }
+.image-upload-preview { display: flex; align-items: flex-start; gap: 12px; padding: 10px; border-radius: 12px; background: #fffaf0; }
+.image-upload-preview img { width: 96px; height: 68px; border-radius: 8px; object-fit: cover; }
+.image-upload-preview button { padding: 7px 10px; border: 0; border-radius: 7px; background: #ece7de; color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; }
+.idea-image { width: 100%; max-height: 220px; border-radius: 10px; object-fit: cover; border: 1px solid rgba(60,53,41,.1); background: rgba(255,255,255,.35); }
