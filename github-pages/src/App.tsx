@@ -73,6 +73,8 @@ export default function Home() {
   const [passwordError, setPasswordError] = useState("");
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const skipFirstSave = useRef(true);
+  const remoteHydration = useRef(false);
+  const savingRef = useRef(false);
 
   const showToast = useCallback((type: "success" | "error", text: string) => {
     setToast({ type, text }); window.setTimeout(() => setToast(null), 3600);
@@ -88,6 +90,7 @@ export default function Home() {
       const loadedWeek = { ...fallback.week, ...(incoming.week || {}) };
       loadedWeek.start = normalizeLegacyWeekStart(loadedWeek.start);
       const loadedHistory = Array.isArray(incoming.weekHistory) ? incoming.weekHistory.map((item) => { const start = normalizeLegacyWeekStart(item.start); return start === item.start ? item : { ...item, id: start, start }; }) : [];
+      remoteHydration.current = true;
       setData({
         week: loadedWeek,
         products: Array.isArray(incoming.products) ? incoming.products : fallback.products,
@@ -106,17 +109,27 @@ export default function Home() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (!ready) return;
+    if (remoteHydration.current) { remoteHydration.current = false; skipFirstSave.current = false; return; }
     if (skipFirstSave.current) { skipFirstSave.current = false; return; }
-    setSaveState("saving");
+    setSaveState("saving"); savingRef.current = true;
     const timer = window.setTimeout(async () => {
-      try {
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ id: REMOTE_STATE_ID, data }) });
-        if (!response.ok) throw new Error("保存失败");
-        setSaveState("saved");
-      } catch (error) { setSaveState("error"); showToast("error", error instanceof Error ? error.message : "保存失败，请重试"); }
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ id: REMOTE_STATE_ID, data }) });
+          if (!response.ok) throw new Error(`保存失败（${response.status}）`);
+          setSaveState("saved"); savingRef.current = false; return;
+        } catch (error) { lastError = error; await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1))); }
+      }
+      savingRef.current = false; setSaveState("error"); showToast("error", lastError instanceof Error ? lastError.message : "保存失败，请重试");
     }, 650);
     return () => window.clearTimeout(timer);
   }, [data, ready, showToast]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => { if (!savingRef.current) void load(true); }, 8000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
   const enterEditMode = () => {
     const expiresAt = Number(window.localStorage.getItem(EDIT_SESSION_KEY) || 0);
