@@ -329,3 +329,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: default; color: inh
 .week-type { font-style: normal; font-size: .58em; font-weight: 750; vertical-align: middle; }
 .week-type.small { color: #1b74a0; }
 .week-type.large { color: var(--accent); }
+
+.capacity-panel { position: relative; overflow: hidden; }
+.capacity-z { position: absolute; top: 18px; right: 28px; z-index: 0; color: rgba(247, 79, 51, .12); font: 800 clamp(92px, 12vw, 168px)/.8 Arial, sans-serif; letter-spacing: -.12em; transform: rotate(-14deg); pointer-events: none; user-select: none; }
+.capacity-panel > *:not(.capacity-z) { position: relative; z-index: 1; }
+@media (max-width: 720px) { .capacity-z { top: 16px; right: 14px; font-size: 86px; } }
