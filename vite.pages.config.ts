@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   root: "github-pages",
-  base: "/north-team-office/",
+  base: "/tjp/",
   plugins: [react()],
   build: { outDir: "../pages-dist", emptyOutDir: true },
 });
