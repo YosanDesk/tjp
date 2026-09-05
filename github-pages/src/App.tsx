@@ -6,7 +6,7 @@ type Product = { id: string; name: string; videoTarget: number; videoDone: numbe
 type WorkRequest = { id: string; name: string; product: string; deliveryType: string; feishuLink: string; quantity: number; dueDate: string; priority: string; submitter: string; notes: string; status: "待确认" | "制作中" | "已完成"; createdAt: string };
 type Idea = { id: string; title: string; copy: string; referenceLink: string; story: string; category: "文案" | "视频" | "用户故事" | "其他"; recorder: string; date?: string; accepted: boolean; createdAt: string };
 type WeekRecord = Week & { id: string; products: Product[] };
-type AppData = { week: Week; products: Product[]; requests: WorkRequest[]; ideas: Idea[]; weekHistory?: WeekRecord[]; activeWeekId?: string };
+type AppData = { week: Week; products: Product[]; requests: WorkRequest[]; ideas: Idea[]; weekHistory?: WeekRecord[]; activeWeekId?: string; syncVersion?: number };
 type SaveState = "loading" | "saved" | "saving" | "error";
 
 const SUPABASE_URL = "https://phklgazjbpotnyvvtxff.supabase.co";
@@ -79,6 +79,7 @@ export default function Home() {
   const remoteHydration = useRef(false);
   const savingRef = useRef(false);
   const localRevisionRef = useRef(0);
+  const syncVersionRef = useRef(0);
   const updateData = useCallback<React.Dispatch<React.SetStateAction<AppData>>>((next) => {
     localRevisionRef.current += 1;
     rawSetData(next);
@@ -96,6 +97,9 @@ export default function Home() {
       if (!response.ok) throw new Error("读取共享数据失败");
       const rows = await response.json() as Array<{ data?: AppData }>;
       const incoming = (rows[0]?.data || fallback) as Partial<AppData>;
+      const incomingVersion = Number(incoming.syncVersion || 0);
+      if (incomingVersion < syncVersionRef.current) return;
+      syncVersionRef.current = incomingVersion;
       const loadedWeek = { ...fallback.week, ...(incoming.week || {}) };
       loadedWeek.start = normalizeLegacyWeekStart(loadedWeek.start);
       const loadedHistory = Array.isArray(incoming.weekHistory) ? incoming.weekHistory.map((item) => { const start = normalizeLegacyWeekStart(item.start); return start === item.start ? item : { ...item, id: start, start }; }) : [];
@@ -129,7 +133,8 @@ export default function Home() {
           const latest = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${REMOTE_STATE_ID}&select=data`, { headers: remoteHeaders(), cache: "no-store" });
           if (!latest.ok) throw new Error("读取最新共享数据失败");
           const latestRows = await latest.json() as Array<{ data?: Record<string, unknown> }>;
-          const mergedData = { ...(latestRows[0]?.data || {}), ...data };
+          const mergedData = { ...(latestRows[0]?.data || {}), ...data, syncVersion: Math.max(Date.now(), syncVersionRef.current + 1) };
+          syncVersionRef.current = mergedData.syncVersion;
           const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ id: REMOTE_STATE_ID, data: mergedData }) });
           if (!response.ok) {
             const detail = await response.text();
