@@ -60,7 +60,7 @@ const weekLabel = (start: string) => {
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("progress");
-  const [data, setData] = useState<AppData>(fallback);
+  const [data, rawSetData] = useState<AppData>(fallback);
   const [saveState, setSaveState] = useState<SaveState>("loading");
   const [ready, setReady] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
@@ -75,6 +75,11 @@ export default function Home() {
   const skipFirstSave = useRef(true);
   const remoteHydration = useRef(false);
   const savingRef = useRef(false);
+  const localRevisionRef = useRef(0);
+  const updateData = useCallback<React.Dispatch<React.SetStateAction<AppData>>>((next) => {
+    localRevisionRef.current += 1;
+    rawSetData(next);
+  }, []);
 
   const showToast = useCallback((type: "success" | "error", text: string) => {
     setToast({ type, text }); window.setTimeout(() => setToast(null), 3600);
@@ -82,6 +87,7 @@ export default function Home() {
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setSaveState("loading");
+    const revisionAtRequest = localRevisionRef.current;
     try {
       const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${REMOTE_STATE_ID}&select=data`, { headers: remoteHeaders(), cache: "no-store" });
       if (!response.ok) throw new Error("读取共享数据失败");
@@ -90,8 +96,9 @@ export default function Home() {
       const loadedWeek = { ...fallback.week, ...(incoming.week || {}) };
       loadedWeek.start = normalizeLegacyWeekStart(loadedWeek.start);
       const loadedHistory = Array.isArray(incoming.weekHistory) ? incoming.weekHistory.map((item) => { const start = normalizeLegacyWeekStart(item.start); return start === item.start ? item : { ...item, id: start, start }; }) : [];
+      if (savingRef.current || localRevisionRef.current !== revisionAtRequest) return;
       remoteHydration.current = true;
-      setData({
+      rawSetData({
         week: loadedWeek,
         products: Array.isArray(incoming.products) ? incoming.products : fallback.products,
         requests: Array.isArray(incoming.requests) && incoming.requests.every((item) => "deliveryType" in item) ? incoming.requests : [],
@@ -121,7 +128,10 @@ export default function Home() {
           const latestRows = await latest.json() as Array<{ data?: Record<string, unknown> }>;
           const mergedData = { ...(latestRows[0]?.data || {}), ...data };
           const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ id: REMOTE_STATE_ID, data: mergedData }) });
-          if (!response.ok) throw new Error(`保存失败（${response.status}）`);
+          if (!response.ok) {
+            const detail = await response.text();
+            throw new Error(`保存失败（${response.status}）${detail ? `：${detail.slice(0, 120)}` : ""}`);
+          }
           setSaveState("saved"); savingRef.current = false; return;
         } catch (error) { lastError = error; await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1))); }
       }
@@ -155,10 +165,10 @@ export default function Home() {
   const capacityPct = data.week.capacity ? Math.min(100, Math.round(done / data.week.capacity * 100)) : 0;
   const acceptedCount = data.ideas.filter((idea) => idea.accepted).length;
 
-  const updateProduct = (id: string, patch: Partial<Product>) => setData((current) => ({ ...current, products: current.products.map((p) => p.id === id ? { ...p, ...patch } : p) }));
-  const addProduct = () => setData((current) => ({ ...current, products: [...current.products, { id: uid("product"), name: "", videoTarget: 0, videoDone: 0, imageTarget: 0, imageDone: 0, note: "" }] }));
+  const updateProduct = (id: string, patch: Partial<Product>) => updateData((current) => ({ ...current, products: current.products.map((p) => p.id === id ? { ...p, ...patch } : p) }));
+  const addProduct = () => updateData((current) => ({ ...current, products: [...current.products, { id: uid("product"), name: "", videoTarget: 0, videoDone: 0, imageTarget: 0, imageDone: 0, note: "" }] }));
 
-  const switchWeek = (start: string) => setData((current) => {
+  const switchWeek = (start: string) => updateData((current) => {
     const period = weeklyPeriods.find((item) => item.start === start);
     if (!period) return current;
     if (start === current.week.start) {
@@ -175,7 +185,7 @@ export default function Home() {
     event.preventDefault();
     if (!requestDraft.product || !requestDraft.dueDate || !requestDraft.submitter) { showToast("error", "请完整填写产品、截止日期和提交人"); return; }
     const item: WorkRequest = { ...requestDraft, name: `${requestDraft.product} ${requestDraft.deliveryType}需求`, id: uid("request"), quantity: Math.max(1, requestDraft.quantity), status: "待确认", createdAt: new Date().toISOString() };
-    setData((current) => ({ ...current, requests: [item, ...current.requests] }));
+    updateData((current) => ({ ...current, requests: [item, ...current.requests] }));
     setRequestOpen(false); setRequestDraft(emptyRequest); showToast("success", "需求已保存，正在通知飞书群");
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/torras-feishu-notify`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(item) });
@@ -189,7 +199,7 @@ export default function Home() {
     event.preventDefault();
     const generatedTitle = (ideaDraft.copy || ideaDraft.story).trim().slice(0, 28) || `${ideaDraft.category}灵感`;
     const item: Idea = { ...ideaDraft, title: generatedTitle, id: uid("idea"), accepted: false, createdAt: new Date().toISOString() };
-    setData((current) => ({ ...current, ideas: [item, ...current.ideas] })); setIdeaOpen(false); setIdeaDraft(emptyIdea); showToast("success", "灵感已加入共享库");
+    updateData((current) => ({ ...current, ideas: [item, ...current.ideas] })); setIdeaOpen(false); setIdeaDraft(emptyIdea); showToast("success", "灵感已加入共享库");
   };
 
   const labels: Record<Tab, { title: string; eyebrow: string }> = { progress: { title: "视频进度", eyebrow: "CONTENT OPERATIONS" }, requests: { title: "视频需求表", eyebrow: "REQUEST PIPELINE" }, ideas: { title: "日区灵感库", eyebrow: "JAPAN IDEA LIBRARY" } };
@@ -204,9 +214,9 @@ export default function Home() {
     <main className={`page-${tab}`}>
       <header className="topbar"><div><p className="eyebrow">{labels[tab].eyebrow}</p><h1>{labels[tab].title}</h1></div><MangaScene variant={tab} /><div className="topbar-actions">{tab === "progress" && <><span className={`mode-pill ${isEditing ? "editing" : "readonly"}`}>{isEditing ? "编辑中" : "只读模式"}</span><button className={`edit-mode-button ${isEditing ? "active" : ""}`} onClick={() => isEditing ? setIsEditing(false) : enterEditMode()}>{isEditing ? "退出编辑" : "编辑模式"}</button></>}<div className={`save-pill ${saveState}`}><i />{saveState === "loading" ? "加载共享数据" : saveState === "saving" ? "正在保存" : saveState === "error" ? "保存失败" : "已自动保存"}</div></div></header>
       {!ready ? <Loading /> : <>
-        {tab === "progress" && <ProgressView editable={isEditing} data={data} totals={{ done, scheduled, remaining, capacityPct }} setData={setData} updateProduct={updateProduct} addProduct={addProduct} switchWeek={switchWeek} />}
-        {tab === "requests" && <RequestsView editable={true} requests={data.requests} onNew={() => setRequestOpen(true)} onStatus={(id, status) => setData((current) => ({ ...current, requests: current.requests.map((item) => item.id === id ? { ...item, status } : item) }))} onDelete={(id) => { setData((current) => ({ ...current, requests: current.requests.filter((item) => item.id !== id) })); showToast("success", "需求已删除"); }} />}
-        {tab === "ideas" && <IdeasView editable={true} ideas={data.ideas} acceptedCount={acceptedCount} onNew={() => setIdeaOpen(true)} onToggle={(id) => setData((current) => ({ ...current, ideas: current.ideas.map((item) => item.id === id ? { ...item, accepted: !item.accepted } : item) }))} onDelete={(id) => { setData((current) => ({ ...current, ideas: current.ideas.filter((item) => item.id !== id) })); showToast("success", "灵感已删除"); }} />}
+        {tab === "progress" && <ProgressView editable={isEditing} data={data} totals={{ done, scheduled, remaining, capacityPct }} setData={updateData} updateProduct={updateProduct} addProduct={addProduct} switchWeek={switchWeek} />}
+        {tab === "requests" && <RequestsView editable={true} requests={data.requests} onNew={() => setRequestOpen(true)} onStatus={(id, status) => updateData((current) => ({ ...current, requests: current.requests.map((item) => item.id === id ? { ...item, status } : item) }))} onDelete={(id) => { updateData((current) => ({ ...current, requests: current.requests.filter((item) => item.id !== id) })); showToast("success", "需求已删除"); }} />}
+        {tab === "ideas" && <IdeasView editable={true} ideas={data.ideas} acceptedCount={acceptedCount} onNew={() => setIdeaOpen(true)} onToggle={(id) => updateData((current) => ({ ...current, ideas: current.ideas.map((item) => item.id === id ? { ...item, accepted: !item.accepted } : item) }))} onDelete={(id) => { updateData((current) => ({ ...current, ideas: current.ideas.filter((item) => item.id !== id) })); showToast("success", "灵感已删除"); }} />}
       </>}
     </main>
     {requestOpen && <Modal title="提交拍摄需求" subtitle="保存后将通过飞书机器人自动通知群聊" onClose={() => setRequestOpen(false)}><RequestForm value={requestDraft} setValue={setRequestDraft} onSubmit={submitRequest} onCancel={() => setRequestOpen(false)} /></Modal>}
@@ -219,11 +229,11 @@ export default function Home() {
 function ProgressView({ editable, data, totals, setData, updateProduct, addProduct, switchWeek }: { editable: boolean; data: AppData; totals: { done: number; scheduled: number; remaining: number; capacityPct: number }; setData: React.Dispatch<React.SetStateAction<AppData>>; updateProduct: (id: string, patch: Partial<Product>) => void; addProduct: () => void; switchWeek: (start: string) => void }) {
   return <>
     <section className="capacity-panel"><span className="capacity-z" aria-hidden="true">Z</span><div className="panel-heading"><div><span className="section-index">WEEKLY CAPACITY</span><h2>本周产能 <em className={`week-type ${weekType(data.week.start) === "小周" ? "small" : "large"}`}>（{weekType(data.week.start)}）</em></h2><p>按本周实际资源规划拍摄与图片交付</p></div><div className="date-range"><label>开始日期<input type="date" value={data.week.start} onChange={(e) => { const period = weeklyPeriods.find((item) => item.start === e.target.value); if (period) switchWeek(period.start); }} /></label><span>—</span><label>结束日期<input type="date" value={data.week.end} onChange={(e) => { const period = weeklyPeriods.find((item) => item.end === e.target.value); if (period) switchWeek(period.start); }} /></label><select aria-label="历史周" value={data.week.start} onChange={(e) => switchWeek(e.target.value)}>{!weeklyPeriods.some((period) => period.start === data.week.start) && <option value={data.week.start}>{rangeLabel(data.week.start, data.week.end)}（当前）</option>}{weeklyPeriods.map((period) => <option key={period.start} value={period.start}>{period.label}{period.start === data.week.start ? "（当前）" : ""}</option>)}</select></div></div>
-      <div className="summary-grid"><label className="capacity-input"><span>{weekLabel(data.week.start)} · 可完成</span><div><input disabled={!editable} aria-label="本周可完成内容数量" type="number" min="0" value={data.week.capacity} onChange={(e) => setData((d) => ({ ...d, week: { ...d.week, capacity: safeNumber(e.target.value) } }))} /><small>项内容</small></div></label><Summary label="已完成" value={totals.done} unit="项" /><Summary label="已排期" value={totals.scheduled} unit="项" /><Summary label="待完成" value={totals.remaining} unit="项" /><Summary label="还可接需求" value={Math.max(0, data.week.capacity - totals.scheduled)} unit="项" /></div>
+      <div className="summary-grid"><label className="capacity-input"><span>{weekLabel(data.week.start)} · 可完成</span><div><input disabled={!editable} aria-label="本周可完成内容数量" type="number" min="0" value={data.week.capacity} onChange={(e) => updateData((d) => ({ ...d, week: { ...d.week, capacity: safeNumber(e.target.value) } }))} /><small>项内容</small></div></label><Summary label="已完成" value={totals.done} unit="项" /><Summary label="已排期" value={totals.scheduled} unit="项" /><Summary label="待完成" value={totals.remaining} unit="项" /><Summary label="还可接需求" value={Math.max(0, data.week.capacity - totals.scheduled)} unit="项" /></div>
       <div className="total-progress"><div><span>总产能进度</span><b>{totals.capacityPct}%</b></div><div className="progress-track"><i style={{ width: `${totals.capacityPct}%` }} /></div><p>{totals.scheduled > data.week.capacity ? `当前排期超出本周产能 ${totals.scheduled - data.week.capacity} 项，请及时调整。` : `本周还有 ${Math.max(0, data.week.capacity - totals.done)} 项内容产能。`}</p></div>
     </section>
     <section className="deliveries"><div className="section-heading"><div><span className="section-index">DELIVERY BOARD</span><h2>视频进度明细</h2><p>修改目标和完成量后，进度与状态会自动更新</p></div><button disabled={!editable} className="primary-button" onClick={addProduct}>＋ 新增产品行</button></div>
-      {data.products.length === 0 ? <Empty disabled={!editable} icon="＋" title="还没有产品" text="新增第一行并填写本周交付目标。" action="新增产品行" onAction={addProduct} /> : <div className="product-grid">{data.products.map((product) => <ProductRow editable={editable} key={product.id} product={product} update={updateProduct} remove={() => setData((d) => ({ ...d, products: d.products.filter((p) => p.id !== product.id) }))} />)}</div>}
+      {data.products.length === 0 ? <Empty disabled={!editable} icon="＋" title="还没有产品" text="新增第一行并填写本周交付目标。" action="新增产品行" onAction={addProduct} /> : <div className="product-grid">{data.products.map((product) => <ProductRow editable={editable} key={product.id} product={product} update={updateProduct} remove={() => updateData((d) => ({ ...d, products: d.products.filter((p) => p.id !== product.id) }))} />)}</div>}
     </section>
   </>;
 }
