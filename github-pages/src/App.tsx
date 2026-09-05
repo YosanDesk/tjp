@@ -67,7 +67,10 @@ export default function Home() {
   const [ideaOpen, setIdeaOpen] = useState(false);
   const [requestDraft, setRequestDraft] = useState(emptyRequest);
   const [ideaDraft, setIdeaDraft] = useState(emptyIdea);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return Number(window.localStorage.getItem(EDIT_SESSION_KEY) || 0) > Date.now();
+  });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
